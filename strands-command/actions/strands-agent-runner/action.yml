@@ -49,12 +49,9 @@ runs:
         echo "session_id=$(jq -r .session_id strands-parsed-input.json)" >> $GITHUB_OUTPUT
         echo "head_repo=$(jq -r '.head_repo // ""' strands-parsed-input.json)" >> $GITHUB_OUTPUT
         echo "mode=$(jq -r '.mode // ""' strands-parsed-input.json)" >> $GITHUB_OUTPUT
-        echo "system_prompt<<EOF" >> $GITHUB_OUTPUT
-        jq -r .system_prompt strands-parsed-input.json >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
-        echo "task_prompt<<EOF" >> $GITHUB_OUTPUT
-        jq -r .prompt strands-parsed-input.json >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
+        # Prompts hold untrusted text (issue bodies) that could inject step outputs, so they bypass
+        # $GITHUB_OUTPUT. Stash outside the workspace, which the repository checkout below replaces.
+        cp strands-parsed-input.json ${{ runner.temp }}/strands-parsed-input.json
 
     # Checkout devtools repo for scripts
     - name: Checkout devtools
@@ -226,10 +223,6 @@ runs:
         GITHUB_TOKEN: ${{ github.token }}
         GITHUB_REPOSITORY: ${{ github.repository }}
 
-        # Task Configuration
-        INPUT_TASK: ${{ steps.read-input.outputs.task_prompt }}
-        INPUT_SYSTEM_PROMPT: ${{ steps.read-input.outputs.system_prompt }}
-
         # AWS Configuration
         AWS_REGION: 'us-west-2'
 
@@ -252,6 +245,9 @@ runs:
         # Evals Configuration (input overrides Secrets Manager)
         EVALS_SQS_QUEUE_ARN: ${{ inputs.evals_sqs_queue_arn || steps.secrets.outputs.evals_sqs_queue_arn }}
       run: |
+        INPUT_TASK="$(jq -r .prompt ${{ runner.temp }}/strands-parsed-input.json)"
+        INPUT_SYSTEM_PROMPT="$(jq -r .system_prompt ${{ runner.temp }}/strands-parsed-input.json)"
+        export INPUT_SYSTEM_PROMPT
         uv run --no-project ${{ runner.temp }}/strands-agent-runner/strands-command/scripts/python/agent_runner.py "$INPUT_TASK"
 
     - name: Capture repository state
